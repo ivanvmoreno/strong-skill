@@ -23,8 +23,8 @@ metadata:
 
 # Strong Workout Tracker (v6 API)
 
-Unofficial REST API for the Strong workout tracking app (v6+). The backend is at
-`https://back.strong.app` behind Azure Front Door.
+Unofficial REST API for the Strong workout tracking app (v6+). All API
+interaction goes through the CLI dispatcher at `scripts/strong_runner.py`.
 
 > **Warning:** This API is reverse-engineered and unofficial. Use at your own
 > risk.
@@ -36,52 +36,36 @@ Unofficial REST API for the Strong workout tracking app (v6+). The backend is at
 | `STRONG_USERNAME` | Strong account username or email |
 | `STRONG_PASSWORD` | Strong account password |
 
-## Common Headers
+Both must be set before running any command. The CLI reads them automatically.
 
-Every request requires these headers to pass Azure Front Door:
+## Runner
 
-```bash
-STRONG_BASE="https://back.strong.app"
-
-COMMON_HEADERS=(
-  -H "Content-Type: application/json"
-  -H "User-Agent: okhttp/4.12.0"
-  -H "X-Client-Platform: android"
-  -H "X-Client-Build: 1118"
-)
-```
-
-After login, add the Bearer token to every subsequent request:
+All commands are invoked via:
 
 ```bash
-AUTH_HEADER=(-H "Authorization: Bearer ${ACCESS_TOKEN}")
+python3 scripts/strong_runner.py <command> [--param value ...]
 ```
+
+Every command authenticates automatically (login is handled internally), prints
+JSON to stdout, and exits. No manual token management is needed.
 
 ## Workflow
 
-1. **Login** to obtain `ACCESS_TOKEN`, `REFRESH_TOKEN`, and `USER_ID`.
-2. Use `Authorization: Bearer <ACCESS_TOKEN>` on all subsequent calls.
-3. Tokens expire in 1200 seconds (20 min). Use the **refresh** endpoint to renew.
-4. All collection responses use **HAL** format with `_links`, `_embedded`, and `total`.
+1. Pick the appropriate subcommand from the list below.
+2. Run it — authentication and token handling happen inside the runner.
+3. All collection responses use **HAL** format with `_links`, `_embedded`, and `total`.
 
 ---
 
 ## 1. Login
 
-Authenticate and obtain a JWT access token.
+Authenticate and return tokens. Rarely needed directly — all other commands log in automatically.
 
 ```bash
-LOGIN_RESPONSE=$(curl -s -X POST "${STRONG_BASE}/auth/login" \
-  "${COMMON_HEADERS[@]}" \
-  -d "{\"login\":\"${STRONG_USERNAME}\",\"password\":\"${STRONG_PASSWORD}\",\"usernameOrEmail\":\"${STRONG_USERNAME}\"}")
-
-ACCESS_TOKEN=$(echo "${LOGIN_RESPONSE}" | jq -r '.accessToken')
-REFRESH_TOKEN=$(echo "${LOGIN_RESPONSE}" | jq -r '.refreshToken')
-USER_ID=$(echo "${LOGIN_RESPONSE}" | jq -r '.userId')
-echo "User: ${USER_ID}  Token expires in: $(echo "${LOGIN_RESPONSE}" | jq '.expiresIn')s"
+python3 scripts/strong_runner.py login
 ```
 
-**Response:** `{ "accessToken": "eyJ...", "refreshToken": "kf3Z...", "expiresIn": 1200, "userId": "uuid" }`
+**Output:** `{ "accessToken": "eyJ...", "refreshToken": "kf3Z...", "userId": "uuid" }`
 
 ---
 
@@ -90,13 +74,10 @@ echo "User: ${USER_ID}  Token expires in: $(echo "${LOGIN_RESPONSE}" | jq '.expi
 Renew an expired access token without re-entering credentials.
 
 ```bash
-curl -s -X POST "${STRONG_BASE}/auth/login/refresh" \
-  "${COMMON_HEADERS[@]}" "${AUTH_HEADER[@]}" \
-  -d "{\"accessToken\":\"${ACCESS_TOKEN}\",\"refreshToken\":\"${REFRESH_TOKEN}\"}" \
-  | jq '.'
+python3 scripts/strong_runner.py refresh_token
 ```
 
-**Response:** `{ "accessToken": "eyJ...", "refreshToken": "...", "expiresIn": 1200, "userId": "uuid" }`
+**Output:** `{ "accessToken": "eyJ...", "refreshToken": "...", "expiresIn": 1200, "userId": "uuid" }`
 
 ---
 
@@ -105,9 +86,7 @@ curl -s -X POST "${STRONG_BASE}/auth/login/refresh" \
 Fetch the authenticated user's profile, preferences, and purchases.
 
 ```bash
-curl -s "${STRONG_BASE}/api/users/${USER_ID}" \
-  "${COMMON_HEADERS[@]}" "${AUTH_HEADER[@]}" \
-  | jq '{id, username, email, name, goal, firstWeekDay, preferences: .preferences | keys}'
+python3 scripts/strong_runner.py get_profile
 ```
 
 **Response keys:** `id`, `created`, `lastChanged`, `username`, `email`, `emailVerified`, `name`, `goal`, `preferences`, `purchases`, `legacyPurchase`, `legacyGoals`, `startHistoryFromDate`, `firstWeekDay`, `availableLogins`, `migrated`.
@@ -119,9 +98,7 @@ curl -s "${STRONG_BASE}/api/users/${USER_ID}" \
 Fetch all exercises in the user's library.
 
 ```bash
-curl -s "${STRONG_BASE}/api/users/${USER_ID}/measurements" \
-  "${COMMON_HEADERS[@]}" "${AUTH_HEADER[@]}" \
-  | jq '{total, exercises: [._embedded.measurement[] | {id, name: .name.custom, type: .measurementType}]}'
+python3 scripts/strong_runner.py list_exercises
 ```
 
 **Response (HAL):**
@@ -151,10 +128,12 @@ curl -s "${STRONG_BASE}/api/users/${USER_ID}/measurements" \
 ## 5. Get Single Exercise
 
 ```bash
-curl -s "${STRONG_BASE}/api/users/${USER_ID}/measurements/MEASUREMENT_ID" \
-  "${COMMON_HEADERS[@]}" "${AUTH_HEADER[@]}" \
-  | jq '.'
+python3 scripts/strong_runner.py get_exercise --measurement_id <uuid>
 ```
+
+| Parameter | Required | Description |
+|---|---|---|
+| `--measurement_id` | Yes | Exercise/measurement UUID |
 
 ---
 
@@ -163,9 +142,7 @@ curl -s "${STRONG_BASE}/api/users/${USER_ID}/measurements/MEASUREMENT_ID" \
 Fetch all workout templates (routines).
 
 ```bash
-curl -s "${STRONG_BASE}/api/users/${USER_ID}/templates" \
-  "${COMMON_HEADERS[@]}" "${AUTH_HEADER[@]}" \
-  | jq '{total, templates: [._embedded.template[] | {id, name: .name.custom, logType, access}]}'
+python3 scripts/strong_runner.py list_templates
 ```
 
 **Response (HAL):**
@@ -197,10 +174,12 @@ curl -s "${STRONG_BASE}/api/users/${USER_ID}/templates" \
 ## 7. Get Single Template
 
 ```bash
-curl -s "${STRONG_BASE}/api/users/${USER_ID}/templates/TEMPLATE_ID" \
-  "${COMMON_HEADERS[@]}" "${AUTH_HEADER[@]}" \
-  | jq '.'
+python3 scripts/strong_runner.py get_template --template_id <uuid>
 ```
+
+| Parameter | Required | Description |
+|---|---|---|
+| `--template_id` | Yes | Template UUID |
 
 **Response keys:** `id`, `created`, `lastChanged`, `name`, `access`, `logType`, `_embedded.cellSetGroup[]` (each with `id`, `cellSets[]`).
 
@@ -211,9 +190,7 @@ curl -s "${STRONG_BASE}/api/users/${USER_ID}/templates/TEMPLATE_ID" \
 Fetch all completed workout sessions.
 
 ```bash
-curl -s "${STRONG_BASE}/api/users/${USER_ID}/logs" \
-  "${COMMON_HEADERS[@]}" "${AUTH_HEADER[@]}" \
-  | jq '{total, logs: [._embedded.log[] | {id, name: .name.custom, startDate, endDate, logType}]}'
+python3 scripts/strong_runner.py list_logs
 ```
 
 **Response (HAL):**
@@ -246,13 +223,17 @@ curl -s "${STRONG_BASE}/api/users/${USER_ID}/logs" \
 
 ## 9. Get Single Log
 
-Include measurement (exercise) data with `?include=measurement`.
+Fetch a single workout log. Pass `--include_measurement` to embed exercise data.
 
 ```bash
-curl -s "${STRONG_BASE}/api/users/${USER_ID}/logs/LOG_ID?include=measurement" \
-  "${COMMON_HEADERS[@]}" "${AUTH_HEADER[@]}" \
-  | jq '.'
+python3 scripts/strong_runner.py get_log --log_id <uuid>
+python3 scripts/strong_runner.py get_log --log_id <uuid> --include_measurement
 ```
+
+| Parameter | Required | Description |
+|---|---|---|
+| `--log_id` | Yes | Log UUID |
+| `--include_measurement` | No | Include exercise/measurement data in the response |
 
 **Response keys:** `id`, `created`, `lastChanged`, `name`, `access`, `startDate`, `endDate`, `logType`, `_embedded.cellSetGroup[]` (each with `id`, `cellSets[]`, `_embedded.cellSet[]`).
 
@@ -263,9 +244,7 @@ curl -s "${STRONG_BASE}/api/users/${USER_ID}/logs/LOG_ID?include=measurement" \
 Fetch workout template folders.
 
 ```bash
-curl -s "${STRONG_BASE}/api/users/${USER_ID}/folders" \
-  "${COMMON_HEADERS[@]}" "${AUTH_HEADER[@]}" \
-  | jq '{total, folders: [._embedded.folder[] | {id, name: .name, index}]}'
+python3 scripts/strong_runner.py list_folders
 ```
 
 **Response (HAL):** `_embedded.folder[]` with keys: `id`, `created`, `lastChanged`, `name`, `index`.
@@ -277,9 +256,7 @@ curl -s "${STRONG_BASE}/api/users/${USER_ID}/folders" \
 Fetch exercise tags/categories.
 
 ```bash
-curl -s "${STRONG_BASE}/api/users/${USER_ID}/tags" \
-  "${COMMON_HEADERS[@]}" "${AUTH_HEADER[@]}" \
-  | jq '[._embedded.tag[] | {id, name: .name.en, color, isGlobal}]'
+python3 scripts/strong_runner.py list_tags
 ```
 
 **Response (HAL):** `_embedded.tag[]` with keys: `id`, `created`, `name`, `color`, `isGlobal`.
@@ -291,9 +268,7 @@ curl -s "${STRONG_BASE}/api/users/${USER_ID}/tags" \
 Fetch dashboard widget configuration.
 
 ```bash
-curl -s "${STRONG_BASE}/api/users/${USER_ID}/widgets" \
-  "${COMMON_HEADERS[@]}" "${AUTH_HEADER[@]}" \
-  | jq '[._embedded.widget[] | {id, index, widgetType, parameters}]'
+python3 scripts/strong_runner.py list_widgets
 ```
 
 **Response (HAL):** `_embedded.widget[]` with keys: `id`, `created`, `lastChanged`, `index`, `widgetType`, `parameters`.
@@ -305,10 +280,12 @@ curl -s "${STRONG_BASE}/api/users/${USER_ID}/widgets" \
 Generate a shareable link for a workout template.
 
 ```bash
-curl -s -X POST "${STRONG_BASE}/api/users/${USER_ID}/templates/TEMPLATE_ID/link" \
-  "${COMMON_HEADERS[@]}" "${AUTH_HEADER[@]}" \
-  | jq '.'
+python3 scripts/strong_runner.py share_template --template_id <uuid>
 ```
+
+| Parameter | Required | Description |
+|---|---|---|
+| `--template_id` | Yes | Template UUID |
 
 ---
 
@@ -317,10 +294,12 @@ curl -s -X POST "${STRONG_BASE}/api/users/${USER_ID}/templates/TEMPLATE_ID/link"
 Generate a shareable link for a workout log.
 
 ```bash
-curl -s -X POST "${STRONG_BASE}/api/users/${USER_ID}/logs/LOG_ID/link" \
-  "${COMMON_HEADERS[@]}" "${AUTH_HEADER[@]}" \
-  | jq '.'
+python3 scripts/strong_runner.py share_log --log_id <uuid>
 ```
+
+| Parameter | Required | Description |
+|---|---|---|
+| `--log_id` | Yes | Log UUID |
 
 ---
 
@@ -329,10 +308,12 @@ curl -s -X POST "${STRONG_BASE}/api/users/${USER_ID}/logs/LOG_ID/link" \
 Retrieve a shared template or log by its link ID.
 
 ```bash
-curl -s "${STRONG_BASE}/api/links/LINK_ID" \
-  "${COMMON_HEADERS[@]}" "${AUTH_HEADER[@]}" \
-  | jq '.'
+python3 scripts/strong_runner.py get_shared_link --link_id <id>
 ```
+
+| Parameter | Required | Description |
+|---|---|---|
+| `--link_id` | Yes | Shared link ID |
 
 ---
 
