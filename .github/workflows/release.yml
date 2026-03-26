@@ -1,0 +1,104 @@
+name: Publish to ClawHub
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate skill
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check required files exist
+        run: |
+          set -euo pipefail
+          for f in SKILL.md README.md scripts/strong_runner.py; do
+            if [ ! -f "$f" ]; then
+              echo "ERROR: Missing required file: $f"
+              exit 1
+            fi
+          done
+          echo "All required files present."
+
+      - name: Validate frontmatter has clawdbot metadata
+        run: |
+          set -euo pipefail
+          if ! grep -q 'clawdbot' SKILL.md; then
+            echo "ERROR: SKILL.md frontmatter must use metadata.clawdbot"
+            exit 1
+          fi
+          echo "Frontmatter uses clawdbot metadata."
+
+      - name: Validate security manifest in scripts
+        run: |
+          set -euo pipefail
+          for script in scripts/*.py; do
+            if ! grep -q 'SECURITY MANIFEST' "$script"; then
+              echo "ERROR: $script is missing a SECURITY MANIFEST header"
+              exit 1
+            fi
+          done
+          echo "All scripts have security manifests."
+
+      - name: Syntax check Python scripts
+        run: |
+          set -euo pipefail
+          for script in scripts/*.py; do
+            python3 -c "import ast; ast.parse(open('$script').read())"
+            echo "OK: $script"
+          done
+
+  publish:
+    name: Publish to ClawHub
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install ClawHub CLI
+        run: npm install -g clawhub@latest
+
+      - name: Authenticate with ClawHub
+        run: clawhub login --token "${{ secrets.CLAWHUB_TOKEN }}"
+
+      - name: Publish skill
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "Publishing version ${VERSION} to ClawHub..."
+          clawhub publish . --version "$VERSION" --slug strong-app
+
+  github-release:
+    name: Create GitHub Release
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build release archive
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          ARCHIVE="strong-skill-${VERSION}.zip"
+          zip -r "$ARCHIVE" SKILL.md README.md scripts/
+          echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "v${{ env.VERSION }}"
+          generate_release_notes: true
+          files: ${{ env.ARCHIVE }}

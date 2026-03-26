@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate skill package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check required files exist
+        run: |
+          set -euo pipefail
+          for f in SKILL.md README.md scripts/strong_runner.py; do
+            if [ ! -f "$f" ]; then
+              echo "ERROR: Missing required file: $f"
+              exit 1
+            fi
+          done
+          echo "All required files present."
+
+      - name: Validate frontmatter has clawdbot metadata
+        run: |
+          set -euo pipefail
+          if ! grep -q 'clawdbot' SKILL.md; then
+            echo "ERROR: SKILL.md frontmatter must use metadata.clawdbot"
+            exit 1
+          fi
+          echo "Frontmatter uses clawdbot metadata."
+
+      - name: Validate security manifest in scripts
+        run: |
+          set -euo pipefail
+          for script in scripts/*.py; do
+            if ! grep -q 'SECURITY MANIFEST' "$script"; then
+              echo "ERROR: $script is missing a SECURITY MANIFEST header"
+              exit 1
+            fi
+          done
+          echo "All scripts have security manifests."
+
+      - name: Syntax check Python scripts
+        run: |
+          set -euo pipefail
+          for script in scripts/*.py; do
+            python3 -c "import ast; ast.parse(open('$script').read())"
+            echo "OK: $script"
+          done
+
+      - name: Check no forbidden files are present
+        run: |
+          set -euo pipefail
+          FORBIDDEN=(.env .env.local LICENSE)
+          for f in "${FORBIDDEN[@]}"; do
+            if [ -f "$f" ]; then
+              echo "ERROR: $f should not be included in the skill package"
+              exit 1
+            fi
+          done
+          echo "No forbidden files found."
+
+      - name: Validate SKILL.md required sections
+        run: |
+          set -euo pipefail
+          SECTIONS=("External endpoints" "Security and privacy" "Model invocation note" "Trust statement")
+          for section in "${SECTIONS[@]}"; do
+            if ! grep -qi "$section" SKILL.md; then
+              echo "ERROR: SKILL.md is missing required section: $section"
+              exit 1
+            fi
+          done
+          echo "All required SKILL.md sections present."
+
+  test-script:
+    name: Test runner script
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Syntax check
+        run: python3 -c "import ast; ast.parse(open('scripts/strong_runner.py').read())"
+
+      - name: Verify --help works for all subcommands
+        run: |
+          set -euo pipefail
+          python3 scripts/strong_runner.py --help
+          for cmd in login refresh_token get_profile \
+                     list_exercises get_exercise \
+                     list_templates get_template \
+                     list_logs get_log \
+                     list_folders list_tags list_widgets \
+                     share_template share_log get_shared_link; do
+            python3 scripts/strong_runner.py "$cmd" --help > /dev/null
+            echo "OK: $cmd"
+          done
