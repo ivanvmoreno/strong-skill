@@ -5,7 +5,7 @@ description: >
   fetch workout logs and templates, manage folders, tags, measurements, and
   widgets. Use when the user asks about their Strong app workouts, exercises, or
   training data.
-version: 1.0.1
+version: 1.1.0
 homepage: https://github.com/dmzoneill/strongapp-api
 metadata:
   clawdbot:
