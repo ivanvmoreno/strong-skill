@@ -61,6 +61,7 @@ All commands print JSON to stdout.
 - **Tags** — `list_tags`
 - **Widgets** — `list_widgets`
 - **Sharing** — `share_template`, `share_log`, `get_shared_link`
+- **Filtering** — `get_log_at_date`, `get_logs_in_range`, `get_latest_log`, `search_logs_by_name`, `search_exercises_by_name`, `get_exercise_history`
 
 See [SKILL.md](SKILL.md) for full parameter details per command.
 

@@ -317,6 +317,100 @@ python3 scripts/strong_runner.py get_shared_link --link_id <id>
 
 ---
 
+## 16. Get Log at Date
+
+Fetch workout logs whose `startDate` falls on a specific date. Client-side filter over `list_logs`.
+
+```bash
+python3 scripts/strong_runner.py get_log_at_date --date 2025-03-15
+python3 scripts/strong_runner.py get_log_at_date --date 2025-03-15T14:30:00+01:00
+```
+
+| Parameter | Required | Description |
+|---|---|---|
+| `--date` | Yes | Target date (`YYYY-MM-DD` or ISO-8601 timestamp) |
+
+**Response (HAL):** `_embedded.log[]` — only logs matching the given calendar date.
+
+---
+
+## 17. Get Logs in Range
+
+Fetch workout logs between two dates (inclusive). Client-side filter over `list_logs`.
+
+```bash
+python3 scripts/strong_runner.py get_logs_in_range --from 2025-01-01 --to 2025-03-31
+```
+
+| Parameter | Required | Description |
+|---|---|---|
+| `--from` | Yes | Start date (`YYYY-MM-DD` or ISO-8601) |
+| `--to` | Yes | End date (`YYYY-MM-DD` or ISO-8601) |
+
+**Response (HAL):** `_embedded.log[]` — logs sorted by `startDate`, within the range.
+
+---
+
+## 18. Get Latest Log
+
+Return the single most recent workout log by `startDate`. Client-side filter over `list_logs`.
+
+```bash
+python3 scripts/strong_runner.py get_latest_log
+```
+
+**Response:** A single log object (not wrapped in `_embedded`).
+
+---
+
+## 19. Search Logs by Name
+
+Search workout logs by name using a case-insensitive substring match. Client-side filter over `list_logs`.
+
+```bash
+python3 scripts/strong_runner.py search_logs_by_name --name "push day"
+```
+
+| Parameter | Required | Description |
+|---|---|---|
+| `--name` | Yes | Substring to match against log names |
+
+**Response (HAL):** `_embedded.log[]` — matching logs.
+
+---
+
+## 20. Search Exercises by Name
+
+Search exercises by name using a case-insensitive substring match. Client-side filter over `list_exercises`.
+
+```bash
+python3 scripts/strong_runner.py search_exercises_by_name --name "bench press"
+```
+
+| Parameter | Required | Description |
+|---|---|---|
+| `--name` | Yes | Substring to match against exercise names |
+
+**Response (HAL):** `_embedded.measurement[]` — matching exercises.
+
+---
+
+## 21. Get Exercise History
+
+Return all workout logs that contain a specific exercise (by measurement ID). Client-side filter over `list_logs`.
+
+```bash
+python3 scripts/strong_runner.py get_exercise_history --measurement_id <uuid>
+```
+
+| Parameter | Required | Description |
+|---|---|---|
+| `--measurement_id` | Yes | Exercise/measurement UUID to search for |
+
+**Response (HAL):** `_embedded.log[]` — logs containing the exercise, sorted by `startDate`.
+
+---
+
 ## External endpoints
 
 | Endpoint | Purpose |

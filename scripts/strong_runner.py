@@ -16,6 +16,7 @@ Environment variables:
 """
 
 import argparse
+from datetime import datetime, timezone
 import json
 import os
 import sys
@@ -228,6 +229,135 @@ def cmd_get_shared_link(args):
 
 
 # ---------------------------------------------------------------------------
+# Helpers for augmented (client-side) commands
+# ---------------------------------------------------------------------------
+
+def _parse_date(value):
+    """Parse a date string into a timezone-aware datetime.
+
+    Accepts ISO-8601 timestamps or plain YYYY-MM-DD dates.
+    """
+    for fmt in ("%Y-%m-%dT%H:%M:%S.%f%z", "%Y-%m-%dT%H:%M:%S%z",
+                 "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S",
+                 "%Y-%m-%d"):
+        try:
+            dt = datetime.strptime(value, fmt)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt
+        except ValueError:
+            continue
+    raise ValueError(f"Unable to parse date: {value}")
+
+
+def _fetch_all_logs():
+    """Login, fetch all logs, and return the list."""
+    token, _, user_id = _login()
+    resp = _request(
+        "GET", f"/api/users/{user_id}/logs", headers=_auth_headers(token)
+    )
+    return token, user_id, resp.get("_embedded", {}).get("log", [])
+
+
+# ---------------------------------------------------------------------------
+# Augmented command handlers (client-side filtering)
+# ---------------------------------------------------------------------------
+
+def cmd_get_log_at_date(args):
+    """Return logs whose startDate falls on the given date."""
+    target = _parse_date(args.date)
+    _, _, logs = _fetch_all_logs()
+    matched = []
+    for log in logs:
+        start = log.get("startDate")
+        if not start:
+            continue
+        log_dt = _parse_date(start)
+        if log_dt.date() == target.date():
+            matched.append(log)
+    _output({"_embedded": {"log": matched}, "total": len(matched)})
+
+
+def cmd_get_logs_in_range(args):
+    """Return logs whose startDate is between --from and --to (inclusive)."""
+    dt_from = _parse_date(args.date_from)
+    dt_to = _parse_date(args.date_to)
+    _, _, logs = _fetch_all_logs()
+    matched = []
+    for log in logs:
+        start = log.get("startDate")
+        if not start:
+            continue
+        log_dt = _parse_date(start)
+        if dt_from <= log_dt <= dt_to:
+            matched.append(log)
+    matched.sort(key=lambda l: l.get("startDate", ""))
+    _output({"_embedded": {"log": matched}, "total": len(matched)})
+
+
+def cmd_get_latest_log(_args):
+    """Return the most recent workout log by startDate."""
+    _, _, logs = _fetch_all_logs()
+    if not logs:
+        _output({"_embedded": {"log": []}, "total": 0})
+        return
+    latest = max(logs, key=lambda l: l.get("startDate", ""))
+    _output(latest)
+
+
+def cmd_search_logs_by_name(args):
+    """Return logs whose name contains the search string (case-insensitive)."""
+    needle = args.name.lower()
+    _, _, logs = _fetch_all_logs()
+    matched = [
+        log for log in logs
+        if needle in (log.get("name", {}).get("custom", "") or "").lower()
+    ]
+    _output({"_embedded": {"log": matched}, "total": len(matched)})
+
+
+def cmd_search_exercises_by_name(args):
+    """Return exercises whose name contains the search string (case-insensitive)."""
+    needle = args.name.lower()
+    token, _, user_id = _login()
+    resp = _request(
+        "GET", f"/api/users/{user_id}/measurements", headers=_auth_headers(token)
+    )
+    exercises = resp.get("_embedded", {}).get("measurement", [])
+    matched = [
+        ex for ex in exercises
+        if needle in (ex.get("name", {}).get("custom", "") or "").lower()
+    ]
+    _output({"_embedded": {"measurement": matched}, "total": len(matched)})
+
+
+def cmd_get_exercise_history(args):
+    """Return all logs containing a specific exercise (measurement ID)."""
+    mid = args.measurement_id
+    token, _, user_id = _login()
+    resp = _request(
+        "GET", f"/api/users/{user_id}/logs", headers=_auth_headers(token)
+    )
+    logs = resp.get("_embedded", {}).get("log", [])
+    matched = []
+    for log in logs:
+        groups = log.get("_embedded", {}).get("cellSetGroup", [])
+        for group in groups:
+            cells = group.get("cellSets", [])
+            embedded_cells = group.get("_embedded", {}).get("cellSet", [])
+            all_cells = cells + embedded_cells
+            for cell in all_cells:
+                if cell.get("measurementId") == mid:
+                    matched.append(log)
+                    break
+            else:
+                continue
+            break
+    matched.sort(key=lambda l: l.get("startDate", ""))
+    _output({"_embedded": {"log": matched}, "total": len(matched)})
+
+
+# ---------------------------------------------------------------------------
 # Argument parser
 # ---------------------------------------------------------------------------
 
@@ -287,6 +417,61 @@ def build_parser() -> argparse.ArgumentParser:
     p = subs.add_parser("get_shared_link", help="Retrieve a shared link by ID")
     p.add_argument("--link_id", required=True, help="Shared link ID")
 
+    # --- Augmented (client-side filtering) ---
+    p = subs.add_parser(
+        "get_log_at_date",
+        help="Get workout logs whose startDate falls on a given date",
+    )
+    p.add_argument(
+        "--date", required=True,
+        help="Target date (YYYY-MM-DD or ISO-8601 timestamp)",
+    )
+
+    p = subs.add_parser(
+        "get_logs_in_range",
+        help="Get workout logs between two dates (inclusive)",
+    )
+    p.add_argument(
+        "--from", required=True, dest="date_from",
+        help="Start date (YYYY-MM-DD or ISO-8601)",
+    )
+    p.add_argument(
+        "--to", required=True, dest="date_to",
+        help="End date (YYYY-MM-DD or ISO-8601)",
+    )
+
+    subs.add_parser(
+        "get_latest_log",
+        help="Get the most recent workout log by startDate",
+    )
+
+    p = subs.add_parser(
+        "search_logs_by_name",
+        help="Search workout logs by name (case-insensitive substring match)",
+    )
+    p.add_argument(
+        "--name", required=True,
+        help="Substring to match against log names",
+    )
+
+    p = subs.add_parser(
+        "search_exercises_by_name",
+        help="Search exercises by name (case-insensitive substring match)",
+    )
+    p.add_argument(
+        "--name", required=True,
+        help="Substring to match against exercise names",
+    )
+
+    p = subs.add_parser(
+        "get_exercise_history",
+        help="Get all workout logs containing a specific exercise",
+    )
+    p.add_argument(
+        "--measurement_id", required=True,
+        help="Exercise/measurement UUID to search for in logs",
+    )
+
     return parser
 
 
@@ -310,6 +495,12 @@ COMMANDS = {
     "share_template": cmd_share_template,
     "share_log": cmd_share_log,
     "get_shared_link": cmd_get_shared_link,
+    "get_log_at_date": cmd_get_log_at_date,
+    "get_logs_in_range": cmd_get_logs_in_range,
+    "get_latest_log": cmd_get_latest_log,
+    "search_logs_by_name": cmd_search_logs_by_name,
+    "search_exercises_by_name": cmd_search_exercises_by_name,
+    "get_exercise_history": cmd_get_exercise_history,
 }
 
 
